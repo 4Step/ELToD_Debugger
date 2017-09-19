@@ -1,0 +1,186 @@
+---
+title: "D3 Chord"
+author: "Amar Sarvepalli"
+date: "September 15, 2017"
+output: html_document
+---
+
+# Debug:
+For any given Origin or Destination, report mode-split between toll and non-toll,
+  Total path variables: toll cost, travel time for each of the modes
+  Segment path varaibles: Segments traversed, toll charged at each segment, v/c, speeds on each segment
+  Link variables: Total v/c (back or queues) based on capacity.
+
+# TODO:
+
+## Graph: Shortest paths
+#### Input:
+ 1. Edge File: A-B Links with distance, FTYPE, time as link variables.
+ 2. Vertex File: Node, type (zone, dmn, segment_id)
+#### Logic:
+ 1. Build a shortest path between every zone to dmn
+ 2. Apply clustering or pick up closest 1 dmn for each taz (identifying segments)
+    Note: clustering allows to quickly change when the shortest path changes
+ 
+## Group: zones by segments
+Group trip tables by segments allows to display eligible trip flows between the segments
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(chorddiag)
+library(igraph)
+library(dplyr)
+library(tidyr)
+library(knitr)
+
+```
+
+
+## User Settings
+```{r}
+
+# trip table input (in csv format)
+path <- "M:\\Projects\\BLW I-4 impacts ELToDv2.3 2017\\Reporting\\ELTOD Output-CSV via Rscript"
+triptable_file <- "triptable_2040.csv"
+
+# Working directory locations
+new_pp <- "M:\\Projects\\BLW I-4 impacts ELToDv2.3 2017\\Base\\Y2040Rev\\YR2040_NewPP"
+old_pp <- "M:\\Projects\\BLW I-4 impacts ELToDv2.3 2017\\Base\\Y2040Rev\\no_build direct_NewPP"
+
+path <- "M:\\Projects\\BLW I-4 impacts ELToDv2.3 2017\\Reporting\\ELTOD Output-CSV via Rscript"
+triptable_file <- "triptable_2040.csv"
+
+# Detailed OD travel time, toll costs to evaluate
+SOV_8 <- "RUNDETAIL_SOV8.PRN"
+
+# Select zones from above (ideally use segment grouping to identify OD by segment pairs)
+# Manually picked ones are: 136 -> 118 and 136 -> 3( either ends of I-4 terminals)
+# Selected Origins / Destinations
+otaz <- 136 
+dtaz <- c(118, 3)
+
+```
+
+## DEBUG: OD Trips
+Writes out OD trips, EL Shares, and all utility attributes of the logit model for the selected OD pair(s). 
+```{r}
+# TODO: 
+# Get all hours  and let user choose which hour(s) to report
+
+# read OD outputs
+old_df <- read.csv(paste(old_pp, SOV_8, sep = "\\"))
+new_df <- read.csv(paste(new_pp, SOV_8, sep = "\\"))
+
+# Get the last iteration
+max_iter_old <- max(old_df$ITER)
+max_iter_new <- max(new_df$ITER)
+
+# select OD attributes for last iterations
+debug_old <- old_df %>% filter(ITER == max_iter_old, I == otaz, J %in% dtaz)
+debug_new <- new_df %>% filter(ITER == max_iter_new, I == otaz, J %in% dtaz)
+
+# report selected OD attributes
+kable(debug_old, caption = "Select IJ No-Build")
+kable(debug_new, caption = "Select IJ Build")
+
+```
+
+# Gainers and Loosers
+Write out top 10 OD pairs who gained / lost EL trips between No-Build ad Build scenarios
+
+1. Checks OD trips between inputs (No-Build vs Build). Ideally these should 
+    be the same input trip tables and reports if they are not identical.
+2. Print top 10 ODs with EL trip gains
+3. Print top 10 ODs with EL trip loses
+
+```{r}
+
+debug_old  <- old_df %>% 
+              filter(ITER == max_iter_old) 
+
+debug_new  <- new_df %>% 
+              filter(ITER == max_iter_new)
+
+debug_diff <- debug_new %>% 
+              left_join(debug_old, by = c("I", "J"), suffix = c(".new", ".old")) %>%
+              mutate(Trip_TOT.diff = Trip_TOT.new - Trip_TOT.old,
+                     Trip_TL.diff = Trip_TL.new - Trip_TL.old,
+                     Trip_TL_F.diff = Trip_TL_F.new - Trip_TL_F.old,
+                     Trip_EL.diff = Trip_TL.diff + Trip_TL_F.diff)
+
+# Trip tables with incosistent total OD flows
+asymetry_IJ <- debug_diff %>% 
+               filter(Trip_TOT.diff != 0) %>% 
+               select(I, J, Trip_TOT.new, Trip_TOT.old, Trip_TOT.diff) %>%
+               kable(caption = "Inconsistent Total OD Flows between No-Build and Build")
+
+# Top 10 ODs with EL trip gains
+top_10_gainers <- debug_diff %>% 
+               filter(Trip_EL.diff > 1) %>% 
+               select(I, J, Trip_TOT.new, Trip_TOT.old, 
+                      Trip_TL.new, Trip_TL.old, 
+                      Trip_TL_F.new, Trip_TL_F.old,
+                      Trip_EL.diff) %>% 
+               arrange(desc(Trip_EL.diff)) %>%
+               slice(1:10) %>%
+               kable(caption = "EL Trip Gains between No-Build and Build")
+
+# Top 10 ODs with EL trip loses
+top_10_loosers <- debug_diff %>% 
+               filter(Trip_EL.diff < -1 ) %>% 
+               select(I, J, Trip_TOT.new, Trip_TOT.old, 
+                      Trip_TL.new, Trip_TL.old, 
+                      Trip_TL_F.new, Trip_TL_F.old,
+                      Trip_EL.diff) %>% 
+               arrange(Trip_EL.diff) %>% 
+               slice(1:10) %>%
+               kable(caption = "EL Trip Gains between No-Build and Build")
+
+
+# print tables
+asymetry_IJ
+
+top_10_gainers
+
+top_10_loosers
+
+```
+
+
+# District to District Flows (Input OD trips)
+For both input and output trips, generate aggegated d2d flows
+1. Groups zones into districts based on the proximity (distance or time).
+2. Aggregates input OD trips into these districts.
+    b. Write out an aggregated trip table
+    c. Produce a d3 plot (district to distric flows)
+3. Aggregate output (No-Build and Build) EL trips into same districts
+   a. Write out EL trips by districts
+   b. Produce a d3 plot
+   c. Produce a d3 difference plot to see gainers and loosers by segments.
+   
+
+```{r }
+# Read trip table
+tt <- read.csv(triptable_file)
+
+# reformat as matrix
+tt_m <- as.matrix(tt[, 2:ncol(tt)])
+taz_names <- tt[,1]
+dimnames(tt_m) <- list(otaz = taz_names,
+                    dtaz = taz_names)
+
+# produce a d3 chord diagram (group tazs by segments)
+# chorddiag(tt_m, groupnamePadding = 80)
+
+# filter (get the top trips for a given origin)
+tt_t <- tt %>% gather(key, value, -SOV) 
+  
+tt_t %>% 
+  filter(SOV == otaz) %>% 
+  arrange(desc(value) )
+
+```
+
+
