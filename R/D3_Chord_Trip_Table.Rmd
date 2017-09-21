@@ -42,24 +42,29 @@ library(knitr)
 ```{r}
 
 # trip table input (in csv format)
-path <- "M:\\Projects\\BLW I-4 impacts ELToDv2.3 2017\\Reporting\\ELTOD Output-CSV via Rscript"
-triptable_file <- "triptable_2040.csv"
+# path <- "C:\\projects\\R-projects\\ELToD_Debugger\\data"
+path <- "M:\\Projects\\Veterans ELToDv2.3 2017-0628_PDNE\\Base\\Y2020Rev\\PeakHour"
+triptable_file <- "triptable_2020.csv"
 
-# Working directory locations
-new_pp <- "M:\\Projects\\BLW I-4 impacts ELToDv2.3 2017\\Base\\Y2040Rev\\YR2040_NewPP"
-old_pp <- "M:\\Projects\\BLW I-4 impacts ELToDv2.3 2017\\Base\\Y2040Rev\\no_build direct_NewPP"
+# Setting to use one or two scenarios (old and new)
+use_both <- TRUE 
+use_new <- TRUE  # used only when use_both is false
 
-path <- "M:\\Projects\\BLW I-4 impacts ELToDv2.3 2017\\Reporting\\ELTOD Output-CSV via Rscript"
-triptable_file <- "triptable_2040.csv"
+# Working directory locations 
+new_pp <- "M:\\Projects\\Veterans ELToDv2.3 2017-0628_PDNE\\Base\\Y2020Rev\\PeakHour\\Delay"
+old_pp <- "M:\\Projects\\Veterans ELToDv2.3 2017-0628_PDNE\\Base\\Y2020Rev\\PeakHour\\NoDelay"
 
 # Detailed OD travel time, toll costs to evaluate
-SOV_8 <- "RUNDETAIL_SOV8.PRN"
-
-# Select zones from above (ideally use segment grouping to identify OD by segment pairs)
-# Manually picked ones are: 136 -> 118 and 136 -> 3( either ends of I-4 terminals)
 # Selected Origins / Destinations
-otaz <- 136 
-dtaz <- c(118, 3)
+# SOV_file <- "RUNDETAIL_SOV17.PRN"
+# otaz <- c(8,40, 9, 12, 13, 14) 
+# dtaz <- c(33, 32)
+
+# Detailed OD travel time, toll costs to evaluate
+# Selected Origins / Destinations
+SOV_file <- "RUNDETAIL_SOV8.PRN"
+otaz <- c(31, 34)
+dtaz <- c(41, 44)
 
 ```
 
@@ -69,21 +74,51 @@ Writes out OD trips, EL Shares, and all utility attributes of the logit model fo
 # TODO: 
 # Get all hours  and let user choose which hour(s) to report
 
-# read OD outputs
-old_df <- read.csv(paste(old_pp, SOV_8, sep = "\\"))
-new_df <- read.csv(paste(new_pp, SOV_8, sep = "\\"))
+# Just use data from the local directory for one file
+if(!use_both) {
+  
+ if(!use_new) {
+   # OLD: read OD outputs
+   old_pp <- path
+   old_df <- read.csv(paste(old_pp, SOV_file, sep = "\\"))
+   max_iter_old <- max(old_df$ITER)
+   debug_old <- old_df %>% filter(ITER == max_iter_old, I == otaz, J %in% dtaz)
+   kable(debug_old, caption = "Select IJ No-Build") 
+  
+ } else {
+   # NEW: read OD outputs
+   new_pp <- path
+   new_df <- read.csv(paste(new_pp, SOV_file, sep = "\\"))
+   max_iter_new <- max(new_df$ITER)
+   debug_new <- new_df %>% filter(ITER == max_iter_new, I %in% otaz, J %in% dtaz)
+   # debug_new <- new_df %>% filter(ITER == max_iter_new, I %in% otaz) %>% arrange(desc(Trip_TOT))
+   kable(debug_new, caption = "Select IJ Build")   
+ }
 
-# Get the last iteration
-max_iter_old <- max(old_df$ITER)
-max_iter_new <- max(new_df$ITER)
+}  else {
+  # OLD: read OD outputs
+  old_df <- read.csv(paste(old_pp, SOV_file, sep = "\\"))
+  max_iter_old <- max(old_df$ITER)
+  debug_old <- old_df %>% filter(ITER == max_iter_old, I == otaz, J %in% dtaz)
+  kable(debug_old, caption = "Select IJ No-Build") 
+  
+  # NEW: read OD outputs
+  new_pp <- path
+  new_df <- read.csv(paste(new_pp, SOV_file, sep = "\\"))
+  max_iter_new <- max(new_df$ITER)
+  debug_new <- new_df %>% filter(ITER == max_iter_new, I == otaz, J %in% dtaz)
+  kable(debug_new, caption = "Select IJ Build")   
+  
+}
+  
 
-# select OD attributes for last iterations
-debug_old <- old_df %>% filter(ITER == max_iter_old, I == otaz, J %in% dtaz)
-debug_new <- new_df %>% filter(ITER == max_iter_new, I == otaz, J %in% dtaz)
 
-# report selected OD attributes
-kable(debug_old, caption = "Select IJ No-Build")
-kable(debug_new, caption = "Select IJ Build")
+```
+
+
+
+```{r}
+# Compute logit shares
 
 ```
 
